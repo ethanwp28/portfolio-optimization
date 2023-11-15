@@ -221,37 +221,44 @@ def mean_mad_optimization(portfolio_data, target_return=None):
     :return: Optimal weights for the portfolio.
     """
     # Calculate daily returns
-    daily_returns = portfolio_data.pct_change().dropna()
+    daily_returns = portfolio_data.pct_change().dropna().to_numpy()
 
-    # Calculate mean returns
-    mean_returns = daily_returns.mean()
+    # Calculate mean returns for each stock
+    mean_returns = portfolio_data.pct_change().mean().to_numpy()
 
-    # Number of assets
-    num_assets = len(portfolio_data.columns)
 
-    # Optimization variables
+    # Number of stocks in portfolio
+    num_assets = portfolio_data.shape[1]
+
+    # Optimization Variables
     weights = cp.Variable(num_assets)
-    mad = cp.Variable()
 
-    # Objective: Minimize MAD
+    # Minimize Mean Absolute Deviation (MAD)
+    portfolio_return = mean_returns @ weights
+    mad = cp.sum(cp.abs(daily_returns @ weights - portfolio_return)) / len(daily_returns)
     objective = cp.Minimize(mad)
 
     # Constraints
     constraints = [
-        cp.sum(weights) == 1,  # Sum of weights is 1
-        weights >= 0,          # No short selling
-        mad >= cp.abs(daily_returns - mean_returns) @ weights
+        cp.sum(weights) == 1,       # Sum of weights is 1
+        weights >= 0,               # No short selling (weights are non-negative)
+        portfolio_return >= target_return
     ]
 
-    if target_return is not None:
-        constraints.append(mean_returns @ weights >= target_return)
+    # Problem
+    prob = cp.Problem(objective, constraints)
 
-    # Solve the optimization problem
-    problem = cp.Problem(objective, constraints)
-    problem.solve()
+    # Solve the problem
+    prob.solve()
 
-    return weights.value
-
+    # Check
+    if prob.status not in ["infeasible", "unbounded"]:
+        # Return optimal weights
+        return weights.value
+    else:
+        print("Problem status:", prob.status)
+        return None
+    
 def main():
     # API Key for Alpha Vantage
     api_key = '16SIXTINQJAUF0MZ'
@@ -317,7 +324,8 @@ def main():
     # Mean-MAD
     print("\nPerforming Mean-MAD Optimization...")
     mad_weights = mean_mad_optimization(portfolio_data, target_return=0.1)
-    print("Optimal Weights (Mean-MAD):", mad_weights)
+    if mad_weights is not None:
+        print("Optimal Weights (Mean-MAD):", mad_weights)
 
 
     # Comparison and Analysis...
