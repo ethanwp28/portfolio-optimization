@@ -27,39 +27,25 @@ def fetch_market_data(market_ticker, api_key):
     """
     ts = TimeSeries(key=api_key, output_format='pandas')
     
-    # Fetch the daily adjusted market data
+    # Get daily adjusted market data
     market_data, _ = ts.get_daily_adjusted(symbol=market_ticker, outputsize='full')
 
-    # Use the adjusted close price
+    # Adjusted close price
     return market_data['5. adjusted close']
 
 # Build the stock portfolio
 def create_portfolio(tickers, weights, api_key, start_date, end_date):
     stock_data = fetch_stock_data(tickers, api_key)
 
-    # Ensure the index is a DateTimeIndex and is sorted
+    # Sort index
     stock_data.index = pd.to_datetime(stock_data.index)
     stock_data.sort_index(inplace=True)
 
-    # Create a date range and reindex the DataFrame
+    # Reindex based on date range
     date_range = pd.date_range(start=start_date, end=end_date, freq='B')  # 'B' for business days
     stock_data = stock_data.reindex(date_range, method='ffill')  # Forward fill missing data
 
     return stock_data
-    # Create a DataFrame for portfolio
-   # portfolio = pd.DataFrame({'Weights': weights}, index=tickers)
-    
-    # Adjust the stock data to match the portfolio structure
-   # stock_data.columns = pd.MultiIndex.from_product([['Stock Prices'], stock_data.columns])
-    
-    # Combine portfolio weights with stock data
-  #  portfolio_data = pd.concat([portfolio, stock_data], axis=1)
-
-    # Additional calculations (if needed)
-    # ...
-
-  #  return portfolio_data
-
 
 # VaR Optimization
 def var_optimization(portfolio_data, weights, confidence_level=0.05, days=1):
@@ -103,7 +89,7 @@ def cvar_optimization(portfolio_data, weights, confidence_level=0.05):
     # Calculate portfolio returns
     portfolio_returns = daily_returns.dot(weights)
 
-    # Calculate VaR
+    # Calculate VaR - remove?
     VaR = -np.percentile(portfolio_returns, confidence_level * 100)
 
     # Calculate CVaR
@@ -268,7 +254,7 @@ def mean_mad_optimization(portfolio_data, target_return=None):
 
 def main():
     # API Key for Alpha Vantage
-    api_key = 'VONWIX9CETIDLBPD'
+    api_key = '16SIXTINQJAUF0MZ'
     # Define stock tickers and date range
     tickers = ['AAPL', 'MSFT', 'GOOG']
     weights = [0.4, 0.3, 0.3]
@@ -276,13 +262,13 @@ def main():
     end_date = '2023-10-01'
     risk_free_rate = 0.02  # 2% risk-free rate
 
-    market_ticker = '^GSPC' 
+    market_ticker = 'VTHR' # Vanguard Russell 3000 Index ETF
 
-    # Fetch stock data and create portfolio
+    # Get stock data and create portfolio
     portfolio_data = create_portfolio(tickers, weights, api_key, start_date, end_date)
 
     # Get market data
-    market_data = fetch_market_data(market_ticker, api_key)  # Make sure to define fetch_market_data
+    market_data = fetch_market_data(market_ticker, api_key) 
 
     # Debug - print portfolio data structure
     print("Portfolio Data Columns:", portfolio_data.columns)
