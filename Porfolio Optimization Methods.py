@@ -16,28 +16,49 @@ def fetch_stock_data(tickers, api_key):
     combined_data = pd.concat(data.values(), axis=1, keys=data.keys())
     return combined_data
 
+# Get the market data
+def fetch_market_data(market_ticker, api_key):
+    """
+    Fetch historical market data from Alpha Vantage.
+
+    :param market_ticker: The ticker symbol for the market index (e.g., '^GSPC' for S&P 500).
+    :param api_key: Your Alpha Vantage API key.
+    :return: DataFrame containing the historical market data.
+    """
+    ts = TimeSeries(key=api_key, output_format='pandas')
+    
+    # Fetch the daily adjusted market data
+    market_data, _ = ts.get_daily_adjusted(symbol=market_ticker, outputsize='full')
+
+    # Use the adjusted close price
+    return market_data['5. adjusted close']
+
 # Build the stock portfolio
 def create_portfolio(tickers, weights, api_key, start_date, end_date):
     stock_data = fetch_stock_data(tickers, api_key)
-    # Filter data for the specified date range if necessary
-    stock_data = stock_data.loc[start_date:end_date]
 
-    if sum(weights) != 1:
-        raise ValueError("Sum of weights must be 1")
+    # Ensure the index is a DateTimeIndex and is sorted
+    stock_data.index = pd.to_datetime(stock_data.index)
+    stock_data.sort_index(inplace=True)
 
+    # Create a date range and reindex the DataFrame
+    date_range = pd.date_range(start=start_date, end=end_date, freq='B')  # 'B' for business days
+    stock_data = stock_data.reindex(date_range, method='ffill')  # Forward fill missing data
+
+    return stock_data
     # Create a DataFrame for portfolio
-    portfolio = pd.DataFrame({'Weights': weights}, index=tickers)
+   # portfolio = pd.DataFrame({'Weights': weights}, index=tickers)
     
     # Adjust the stock data to match the portfolio structure
-    stock_data.columns = pd.MultiIndex.from_product([['Stock Prices'], stock_data.columns])
+   # stock_data.columns = pd.MultiIndex.from_product([['Stock Prices'], stock_data.columns])
     
     # Combine portfolio weights with stock data
-    portfolio_data = pd.concat([portfolio, stock_data], axis=1)
+  #  portfolio_data = pd.concat([portfolio, stock_data], axis=1)
 
     # Additional calculations (if needed)
     # ...
 
-    return portfolio_data
+  #  return portfolio_data
 
 
 # VaR Optimization
@@ -255,10 +276,15 @@ def main():
     end_date = '2023-10-01'
     risk_free_rate = 0.02  # 2% risk-free rate
 
+    market_ticker = '^GSPC' 
+
     # Fetch stock data and create portfolio
     portfolio_data = create_portfolio(tickers, weights, api_key, start_date, end_date)
 
-    # Debugging: Print portfolio data structure
+    # Get market data
+    market_data = fetch_market_data(market_ticker, api_key)  # Make sure to define fetch_market_data
+
+    # Debug - print portfolio data structure
     print("Portfolio Data Columns:", portfolio_data.columns)
     print("Number of weights:", len(weights))
     
@@ -266,6 +292,10 @@ def main():
     if len(portfolio_data.columns) != len(weights):
         print("Error: The number of stocks in the portfolio does not match the number of weights.")
         return
+    
+    if portfolio_data is None or market_data is None:
+            print("Error: Unable to fetch data.")
+            return
 
     # Perform portfolio optimizations
 
@@ -286,8 +316,12 @@ def main():
 
     # CAPM
     print("\nEvaluating with CAPM...")
-    capm_returns = capm_evaluation(portfolio_data, risk_free_rate)
+    capm_returns = capm_evaluation(portfolio_data, market_data, risk_free_rate)
     print("Expected Returns (CAPM):", capm_returns)
+    
+    if portfolio_data is not None and market_data is not None:
+        capm_returns = capm_evaluation(portfolio_data, market_data, risk_free_rate)
+        print("CAPM Expected Returns:", capm_returns)
     
     # Monte Carlo
     print("\nPerforming Monte Carlo Optimization...")
