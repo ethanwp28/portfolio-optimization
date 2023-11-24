@@ -1,0 +1,285 @@
+---
+title: "Portfolio Optimization"
+author: "Ethan Pinto"
+date: "2023-11-24"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Install necessary packages:
+
+```{r}
+# install.packages("quantmod")
+# install.packages("PerformanceAnalytics")
+# install.packages("tseries")
+```
+
+
+
+The first step is to pull in stock data that we will use to create our portfolio
+
+```{r}
+# install.packages("quantmod")
+
+# Load the necessary library
+library(quantmod)
+
+# Define the stock symbols
+stocks <- c("AAPL")
+
+# Define the time period for the data
+startDate <- as.Date("2020-01-01")
+endDate <- as.Date("2022-12-31")
+
+# Initialize an empty list to store stock data
+stockData <- list()
+
+# Loop through each stock symbol and download the data
+for (stock in stocks) {
+  stockData[[stock]] <- getSymbols(stock, src = "yahoo", 
+                                   from = startDate, 
+                                   to = endDate, 
+                                   auto.assign = FALSE)
+}
+
+stockReturns <- do.call(merge, lapply(stockData@.Data, function(x) Ad(x)))
+stockReturns <- na.omit(Return.calculate(stockReturns))
+
+head(stockReturns)
+
+```
+
+Next, we will build the portfolio:
+
+```{r}
+# Load necessary libraries
+library(quantmod)
+library(PerformanceAnalytics)
+
+# Assuming you already have the stockData list from the previous step
+
+# Extract Adjusted Close prices for each stock
+prices <- do.call(merge, lapply(stockData, Ad))
+
+# Calculate daily returns
+returns <- na.omit(Return.calculate(prices))
+
+# Create an equally weighted portfolio
+numStocks <- length(stockData)
+weights <- rep(1/numStocks, numStocks)
+
+# Portfolio Returns
+portfolioReturns <- Return.portfolio(R = returns, weights = weights)
+
+# Check the first few rows of the portfolio returns
+head(portfolioReturns)
+
+
+```
+
+With this portfolio, we can now start testing our portfolio optimization methods.
+
+The first method is Value-at-Risk and Conditional Value-at-Risk
+
+```{r}
+# Load necessary libraries
+library(PerformanceAnalytics)
+
+# Set confidence level for VaR and CVaR (e.g., 95%)
+confidenceLevel <- 0.95
+
+# Calculate Historical VaR
+VaR_Historical <- VaR(portfolioReturns, p = confidenceLevel, method = "historical")
+
+# Calculate Historical CVaR
+CVaR_Historical <- ES(portfolioReturns, p = confidenceLevel, method = "historical")
+
+# Print the results
+cat("Historical VaR at", confidenceLevel*100, "% confidence level is:", VaR_Historical, "\n")
+cat("Historical CVaR at", confidenceLevel*100, "% confidence level is:", CVaR_Historical, "\n")
+
+```
+
+Next we will run a Monte Carlo simulation:
+
+```{r}
+# Load necessary libraries
+library(quantmod)
+library(PerformanceAnalytics)
+
+# Monte Carlo Simulation Function for Portfolio Optimization
+monteCarloOptimization <- function(returns, numPortfolios = 10000) {
+  numAssets <- ncol(returns)
+  results <- matrix(0, nrow = numPortfolios, ncol = 3 + numAssets)  # Extend matrix to store weights
+  
+  colnames(results) <- c("Return", "Risk", "Sharpe", paste("Weight", 1:numAssets, sep = "_"))
+
+  for (i in 1:numPortfolios) {
+    # Randomly assign weights to the assets
+    weights <- runif(numAssets)
+    weights <- weights / sum(weights)
+    
+    # Calculate portfolio return and risk
+    portfolioReturn <- sum(colMeans(returns) * weights)
+    portfolioRisk <- sqrt(t(weights) %*% cov(returns) %*% weights)
+    
+    # Store the results, including the weights
+    results[i,] <- c(portfolioReturn, portfolioRisk, portfolioReturn / portfolioRisk, weights)
+  }
+
+  return(results)
+}
+
+portfolioReturns <- Return.portfolio(R = returns, weights = weights)
+
+# Run Monte Carlo Simulation
+mcResults <- monteCarloOptimization(portfolioReturns)
+
+# Find the portfolio with the highest Sharpe ratio
+optimalPortfolio <- mcResults[which.max(mcResults[, "Sharpe"]),]
+
+# Print the optimal portfolio results
+print(optimalPortfolio)
+
+
+```
+
+Next, we will do CAPM optimization. First we will need to pull in Market return data:
+
+```{r}
+# Load necessary libraries
+library(quantmod)
+library(xts)
+
+# Fetch S&P 500 data directly into a variable
+sp500Data <- getSymbols("^GSPC", src = "yahoo", from = startDate, to = endDate, auto.assign = FALSE)
+
+# Check if the data is correctly formatted
+if (is.null(sp500Data)) {
+  stop("Failed to retrieve S&P 500 data")
+} else {
+  # Convert the data to xts format
+  sp500Close <- Ad(sp500Data)  # Using Cl() to extract closing prices
+
+  # Calculate the market return
+  marketReturn <- na.omit(Return.calculate(sp500Close))
+
+  # Print the first few rows to verify
+  head(marketReturn)
+}
+
+```
+
+
+
+```{r}
+# Load necessary libraries
+library(quantmod)
+library(PerformanceAnalytics)
+library(tseries)
+
+# Assuming you've already loaded your stockReturns and marketReturn
+# stockReturns <- ...
+# marketReturn <- ...
+
+# Check for NA values in stockReturns and marketReturn
+if (any(is.na(stockReturns), na.rm = TRUE)) {
+  stop("NA values found in stockReturns.")
+}
+if (any(is.na(marketReturn), na.rm = TRUE)) {
+  stop("NA values found in marketReturn.")
+}
+
+# Ensure that the dates of stockReturns and marketReturn match
+if (!identical(index(stockReturns), index(marketReturn))) {
+  stop("Date indices of stockReturns and marketReturn do not match.")
+}
+
+# Function to calculate Beta for each stock
+calculateBeta <- function(stockReturn, marketReturn) {
+  # Ensure both series are xts or zoo objects and have the same length
+  if (!inherits(stockReturn, c("xts", "zoo")) || !inherits(marketReturn, c("xts", "zoo"))) {
+    stop("stockReturn and marketReturn must be xts or zoo objects.")
+  }
+  
+  if (NROW(stockReturn) != NROW(marketReturn)) {
+    stop("Length of stockReturn (", NROW(stockReturn), 
+         ") and marketReturn (", NROW(marketReturn), 
+         ") must be the same.")
+  }
+
+  # Extract core data for covariance calculation
+  stockReturnCore <- coredata(stockReturn)
+  marketReturnCore <- coredata(marketReturn)
+
+  # Calculate covariance matrix
+  covMat <- cov(stockReturnCore, marketReturnCore)
+
+  # Check for NA or non-matrix result in covariance calculation
+  if (is.na(covMat) || !is.matrix(covMat) || nrow(covMat) != 2 || ncol(covMat) != 2) {
+    stop("Covariance matrix calculation error: Check data for NA values, alignment issues, or unexpected dimensions.")
+  }
+
+  # Calculate beta
+  beta <- covMat[1, 2] / var(marketReturnCore)
+  return(beta)
+}
+
+
+# Function for CAPM-based Portfolio Optimization
+capmOptimization <- function(stockReturns, marketReturn, riskFreeRate) {
+  numAssets <- ncol(stockReturns)
+  betas <- numeric(numAssets)
+  
+  # Calculate Beta for each stock
+  for (i in 1:numAssets) {
+    betas[i] <- calculateBeta(stockReturns[, i], marketReturn)
+  }
+
+  # Calculate Expected Return for each stock using CAPM
+  expectedReturns <- riskFreeRate + betas * (mean(marketReturn) - riskFreeRate)
+
+  optimizePortfolio <- function(stockReturns, expectedReturns) {
+    # Number of assets
+    numAssets <- ncol(stockReturns)
+
+    # Mean returns - Here we use expected returns from CAPM
+    meanReturns <- colMeans(stockReturns)
+
+    # Covariance matrix of returns
+    covReturns <- cov(stockReturns)
+
+    # Portfolio optimization - Maximizing Sharpe Ratio
+    optResult <- portfolio.optim(x = meanReturns, pm = expectedReturns, covmat = covReturns, 
+                               rf = riskFreeRate, shorts = FALSE)
+
+    # Return optimized weights
+    return(optResult$pw)
+}
+  portfolioWeights <- optimizePortfolio(stockReturns, expectedReturns)
+  
+  return(list(betas = betas, expectedReturns = expectedReturns))
+}
+
+# Set a risk-free rate
+riskFreeRate <- 0.015  # Example rate
+
+# Run CAPM Optimization
+capmResults <- capmOptimization(stockReturns, marketReturn, riskFreeRate)
+print(capmResults)
+
+
+```
+
+
+
+
+
+
+
+
+
+

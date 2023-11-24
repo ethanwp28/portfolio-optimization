@@ -47,6 +47,16 @@ def create_portfolio(tickers, weights, api_key, start_date, end_date):
 
     return stock_data
 
+def portfolio_volatility(weights, cov_matrix):
+    """
+    Calculate the portfolio volatility (standard deviation) based on given weights and covariance matrix.
+
+    :param weights: Portfolio weights.
+    :param cov_matrix: Covariance matrix of asset returns.
+    :return: Portfolio volatility.
+    """
+    return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+
 # VaR Optimization
 def var_optimization(portfolio_data, weights, confidence_level=0.05, days=1):
     """
@@ -135,6 +145,69 @@ def mean_variance_optimization(portfolio_data, target_return=None):
     result = minimize(portfolio_volatility, initial_guess, method='SLSQP', bounds=bounds, constraints=constraints)
 
     return result.x
+
+
+# Markowitz Portfolio Optimization
+# Similar to mean-variance optimization, with some modifications
+
+def markowitz_optimization(portfolio_data, target_return=None, risk_free_rate=0.0):
+    """
+    Perform mean-variance optimization for the given portfolio data, with optional Sharpe ratio maximization.
+
+    :param portfolio_data: DataFrame containing historical stock prices.
+    :param target_return: Target return for the portfolio. If None, optimizes for minimum variance.
+    :param risk_free_rate: The risk-free rate used in Sharpe ratio calculation.
+    :return: Dictionary containing optimal weights and additional optimization info.
+    """
+    # Data validation
+    if not isinstance(portfolio_data, pd.DataFrame) or portfolio_data.empty:
+        raise ValueError("portfolio_data must be a non-empty DataFrame.")
+
+    # Calculate daily returns
+    daily_returns = portfolio_data.pct_change().dropna()
+
+    # Ensure sufficient data
+    if len(daily_returns) < len(portfolio_data.columns):
+        raise ValueError("Insufficient data for meaningful optimization.")
+
+    # Mean returns and covariance
+    mean_returns = daily_returns.mean()
+    cov_matrix = daily_returns.cov()
+
+    # Number of assets
+    num_assets = len(mean_returns)
+
+    # Objective function for Sharpe ratio
+    def negative_sharpe_ratio(weights):
+        portfolio_return = np.sum(mean_returns * weights)
+        portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        return -(portfolio_return - risk_free_rate) / portfolio_volatility
+    
+    # Bounds for weights
+    bounds = tuple((0, 1) for _ in range(num_assets))
+
+    # Simplify or remove constraints
+ #   constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
+ #   if target_return is not None:
+  #      constraints.append({'type': 'eq', 'fun': lambda x: np.sum(mean_returns * x) - target_return})
+
+    # Different initial guess
+    initial_guess = np.random.dirichlet(np.ones(num_assets), size=1)[0]
+
+    # Different optimization method, if applicable
+    opts = {'maxiter': 1000, 'ftol': 1e-06}
+
+    try:
+        result = minimize(negative_sharpe_ratio, initial_guess, method='SLSQP', bounds=bounds, constraints=constraints, options=opts)
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+    # Adjusted return structure
+    return {
+        "success": result.success,
+        "message": result.message,
+        "optimal_weights": result.x if result.success else None
+    }
 
 # CAPM Optimization Function
 def capm_evaluation(portfolio_data, market_data, risk_free_rate):
@@ -306,6 +379,14 @@ def main():
     print("Performing Mean-Variance Optimization...")
     mv_weights = mean_variance_optimization(portfolio_data, target_return=0.1)
     print("Optimal Weights (Mean-Variance):", mv_weights)
+
+    # Markowitz Portfolio Optimization
+    print("Performing Markowitz Optimization...")
+    markowitz_optimization_result = markowitz_optimization(portfolio_data, target_return=0.1, risk_free_rate=risk_free_rate)
+    if markowitz_optimization_result['success']:
+        print("Optimal Weights (Markowitz):", markowitz_optimization_result['optimal_weights'])
+    else:
+        print("Markowitz Optimization failed:", markowitz_optimization_result['message'])
 
     # CAPM
     print("\nEvaluating with CAPM...")
