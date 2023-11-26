@@ -1,8 +1,8 @@
 ---
-title: "Portfolio Optimization"
+title: "Portfolio Optimization Comparison"
 author: "Ethan Pinto"
-date: "2023-11-24"
-output: word_document
+date: "`r Sys.Date()`"
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -15,24 +15,26 @@ Install necessary packages:
 # install.packages("quantmod")
 # install.packages("PerformanceAnalytics")
 # install.packages("tseries")
+# install.packages("R.matlab")
+# install.packages("tidyquant")
+# install.packages("tidyr")
+# install.packages("dplyr")
 ```
-
 
 
 The first step is to pull in stock data that we will use to create our portfolio
 
 ```{r}
-# install.packages("quantmod")
 
 # Load the necessary library
 library(quantmod)
 
 # Define the stock symbols
-stocks <- c("AAPL")
+stocks <- c("AAPL","TSLA","GOOG","MSFT")
 
 # Define the time period for the data
-startDate <- as.Date("2020-01-01")
-endDate <- as.Date("2022-12-31")
+startDate <- as.Date("2023-01-04")
+endDate <- as.Date("2023-10-31")
 
 # Initialize an empty list to store stock data
 stockData <- list()
@@ -45,21 +47,21 @@ for (stock in stocks) {
                                    auto.assign = FALSE)
 }
 
-stockReturns <- do.call(merge, lapply(stockData@.Data, function(x) Ad(x)))
-stockReturns <- na.omit(Return.calculate(stockReturns))
+stockPrices <- do.call(merge, lapply(stockData@.Data, function(x) Ad(x)))
 
-head(stockReturns)
+
+head(stockPrices)
 
 ```
 
-Next, we will build the portfolio:
+
+Next, we will build the (equally weighted) portfolio:
 
 ```{r}
 # Load necessary libraries
 library(quantmod)
 library(PerformanceAnalytics)
 
-# Assuming you already have the stockData list from the previous step
 
 # Extract Adjusted Close prices for each stock
 prices <- do.call(merge, lapply(stockData, Ad))
@@ -79,6 +81,7 @@ head(portfolioReturns)
 
 
 ```
+
 
 With this portfolio, we can now start testing our portfolio optimization methods.
 
@@ -100,7 +103,6 @@ CVaR_Historical <- ES(portfolioReturns, p = confidenceLevel, method = "historica
 # Print the results
 cat("Historical VaR at", confidenceLevel*100, "% confidence level is:", VaR_Historical, "\n")
 cat("Historical CVaR at", confidenceLevel*100, "% confidence level is:", CVaR_Historical, "\n")
-
 ```
 
 Next we will run a Monte Carlo simulation:
@@ -123,27 +125,79 @@ monteCarloOptimization <- function(returns, numPortfolios = 10000) {
     weights <- weights / sum(weights)
     
     # Calculate portfolio return and risk
-    portfolioReturn <- sum(colMeans(returns) * weights)
+    portfolioReturn <- sum(apply(returns, 1, function(x) sum(x * weights)))
     portfolioRisk <- sqrt(t(weights) %*% cov(returns) %*% weights)
+    sharpeRatio <- portfolioReturn / portfolioRisk
     
     # Store the results, including the weights
-    results[i,] <- c(portfolioReturn, portfolioRisk, portfolioReturn / portfolioRisk, weights)
+    results[i,] <- c(portfolioReturn, portfolioRisk, sharpeRatio, weights)
   }
 
   return(results)
 }
 
-portfolioReturns <- Return.portfolio(R = returns, weights = weights)
+
 
 # Run Monte Carlo Simulation
-mcResults <- monteCarloOptimization(portfolioReturns)
+mcResults <- monteCarloOptimization(returns)
 
 # Find the portfolio with the highest Sharpe ratio
 optimalPortfolio <- mcResults[which.max(mcResults[, "Sharpe"]),]
 
 # Print the optimal portfolio results
-print(optimalPortfolio)
+cat("Optimal Portfolio:\n")
+cat(sprintf("Return: %f\n", optimalPortfolio["Return"]))
+cat(sprintf("Risk: %f\n", optimalPortfolio["Risk"]))
+cat(sprintf("Sharpe Ratio: %f\n", optimalPortfolio["Sharpe"]))
 
+# Print the weights of each stock in the portfolio
+numAssets <- ncol(returns)
+for (j in 1:numAssets) {
+  cat(sprintf("Weight of Asset %d: %f\n", j, optimalPortfolio[paste("Weight", j, sep = "_")]))
+}
+
+
+```
+
+Calculate the stock returns for further analysis:
+
+```{r}
+# Load the necessary library
+library(quantmod)
+
+# Define the stock symbols
+stocks <- c("AAPL", "TSLA", "GOOG", "MSFT")
+
+# Define the time period for the data
+startDate <- as.Date("2023-01-01")
+endDate <- as.Date("2023-10-31")
+
+# Initialize an empty list to store stock data
+stockData <- list()
+
+# Loop through each stock symbol and download the data
+for (stock in stocks) {
+  stockData[[stock]] <- getSymbols(stock, src = "yahoo", 
+                                   from = startDate, 
+                                   to = endDate, 
+                                   auto.assign = FALSE)
+}
+
+# Initialize an empty list to store stock returns
+stockReturns <- list()
+
+# Loop through each stock symbol and calculate returns
+for (stock in stocks) {
+  tempReturns <- Delt(Ad(stockData[[stock]]))
+  tempReturns[1, ] <- 0  # Set the first day's return to 0
+  stockReturns[[stock]] <- tempReturns
+}
+
+# Merge all return series into a single xts object
+mergedReturns <- do.call(merge, stockReturns)
+
+# Print the first few rows of the merged returns
+head(mergedReturns)
 
 ```
 
@@ -162,10 +216,13 @@ if (is.null(sp500Data)) {
   stop("Failed to retrieve S&P 500 data")
 } else {
   # Convert the data to xts format
-  sp500Close <- Ad(sp500Data)  # Using Cl() to extract closing prices
+  sp500Close <- Ad(sp500Data)  # Using Ad() to extract adjusted closing prices
 
   # Calculate the market return
-  marketReturn <- na.omit(Return.calculate(sp500Close))
+  marketReturn <- Return.calculate(sp500Close)
+
+  # Handling the first row: replacing NA with 0
+  marketReturn[1,] <- 0
 
   # Print the first few rows to verify
   head(marketReturn)
@@ -175,111 +232,310 @@ if (is.null(sp500Data)) {
 
 
 
+
 ```{r}
+# Load necessary libraries
 # Load necessary libraries
 library(quantmod)
 library(PerformanceAnalytics)
 library(tseries)
 
-# Assuming you've already loaded your stockReturns and marketReturn
-# stockReturns <- ...
-# marketReturn <- ...
-
-# Check for NA values in stockReturns and marketReturn
-if (any(is.na(stockReturns), na.rm = TRUE)) {
-  stop("NA values found in stockReturns.")
-}
-if (any(is.na(marketReturn), na.rm = TRUE)) {
-  stop("NA values found in marketReturn.")
-}
-
-# Ensure that the dates of stockReturns and marketReturn match
-if (!identical(index(stockReturns), index(marketReturn))) {
-  stop("Date indices of stockReturns and marketReturn do not match.")
-}
-
 # Function to calculate Beta for each stock
-calculateBeta <- function(stockReturn, marketReturn) {
-  # Ensure both series are xts or zoo objects and have the same length
-  if (!inherits(stockReturn, c("xts", "zoo")) || !inherits(marketReturn, c("xts", "zoo"))) {
-    stop("stockReturn and marketReturn must be xts or zoo objects.")
-  }
+calculateBeta <- function(mergedReturns, marketReturn) {
   
-  if (NROW(stockReturn) != NROW(marketReturn)) {
-    stop("Length of stockReturn (", NROW(stockReturn), 
-         ") and marketReturn (", NROW(marketReturn), 
-         ") must be the same.")
-  }
-
-  # Extract core data for covariance calculation
-  stockReturnCore <- coredata(stockReturn)
-  marketReturnCore <- coredata(marketReturn)
-
+  # Bind columns
+  combinedData <- cbind(coredata(mergedReturns), coredata(marketReturn))
+  
   # Calculate covariance matrix
-  covMat <- cov(stockReturnCore, marketReturnCore)
-
-  # Check for NA or non-matrix result in covariance calculation
-  if (is.na(covMat) || !is.matrix(covMat) || nrow(covMat) != 2 || ncol(covMat) != 2) {
-    stop("Covariance matrix calculation error: Check data for NA values, alignment issues, or unexpected dimensions.")
-  }
+  covMat <- cov(combinedData)
 
   # Calculate beta
-  beta <- covMat[1, 2] / var(marketReturnCore)
+  beta <- covMat[1, 2] / var(coredata(marketReturn))
   return(beta)
 }
 
 
+
 # Function for CAPM-based Portfolio Optimization
-capmOptimization <- function(stockReturns, marketReturn, riskFreeRate) {
-  numAssets <- ncol(stockReturns)
+capmOptimization <- function(mergedReturns, marketReturn, riskFreeRate) {
+  numAssets <- ncol(mergedReturns)
   betas <- numeric(numAssets)
   
-  # Calculate Beta for each stock
+ # Calculate Beta for each stock
   for (i in 1:numAssets) {
-    betas[i] <- calculateBeta(stockReturns[, i], marketReturn)
+    betas[i] <- calculateBeta(mergedReturns[, i], marketReturn)
   }
 
   # Calculate Expected Return for each stock using CAPM
-  expectedReturns <- riskFreeRate + betas * (mean(marketReturn) - riskFreeRate)
+  expectedReturns <- riskFreeRate + betas * (mean(marketReturn, na.rm = TRUE) - riskFreeRate)
 
-  optimizePortfolio <- function(stockReturns, expectedReturns) {
-    # Number of assets
-    numAssets <- ncol(stockReturns)
+  # Covariance matrix of returns
+  covReturns <- cov(mergedReturns, use = "pairwise.complete.obs")
 
-    # Mean returns - Here we use expected returns from CAPM
-    meanReturns <- colMeans(stockReturns)
+  # Define Dmat, dvec, Amat, bvec for quadratic programming
+  Dmat <- 2 * covReturns
+  dvec <- rep(0, numAssets)
+  Amat <- rbind(1, diag(numAssets))
+  bvec <- c(1, rep(0, numAssets))
 
-    # Covariance matrix of returns
-    covReturns <- cov(stockReturns)
+  # Solve quadratic programming problem
+  portfolioOptim <- solve.QP(Dmat, dvec, t(Amat), bvec, meq = 1)
 
-    # Portfolio optimization - Maximizing Sharpe Ratio
-    optResult <- portfolio.optim(x = meanReturns, pm = expectedReturns, covmat = covReturns, 
-                               rf = riskFreeRate, shorts = FALSE)
+  # Extract optimized weights
+  portfolioWeights <- portfolioOptim$solution
 
-    # Return optimized weights
-    return(optResult$pw)
-}
-  portfolioWeights <- optimizePortfolio(stockReturns, expectedReturns)
-  
-  return(list(betas = betas, expectedReturns = expectedReturns))
+  return(list(betas = betas, expectedReturns = expectedReturns, weights = portfolioWeights))
 }
 
 # Set a risk-free rate
-riskFreeRate <- 0.015  # Example rate
+riskFreeRate <- 0.015
 
-# Run CAPM Optimization
-capmResults <- capmOptimization(stockReturns, marketReturn, riskFreeRate)
+capmResults <- capmOptimization(mergedReturns, marketReturn, riskFreeRate)
+
 print(capmResults)
+
+```
+
+
+
+```{r}
+library(quadprog)
+
+markowitzOptimization <- function(stockReturns, riskFreeRate) {
+  numAssets <- ncol(stockReturns)
+
+  # Calculate the mean and covariance of returns
+  meanReturns <- colMeans(stockReturns)
+  covReturns <- cov(stockReturns)
+
+  # Create Dmat and dvec for quadprog
+  Dmat <- 2 * covReturns
+  dvec <- rep(0, numAssets)
+
+  if (!is.matrix(Dmat) || nrow(Dmat) != ncol(Dmat) || nrow(Dmat) != length(dvec)) {
+    stop("Dmat or dvec dimension error")
+  }
+
+  # Constraints: Sum of weights = 1, and All weights >= 0
+  Amat <- rbind(1, diag(numAssets))
+  bvec <- c(1, rep(0, numAssets))
+
+  if (ncol(Amat) != length(dvec) || nrow(Amat) != length(bvec)) {
+    stop("Amat or bvec dimension error")
+  }
+
+  # Solve the quadratic programming problem
+  sol <- solve.QP(Dmat, dvec, t(Amat), bvec, meq = 1)
+
+  # Extract the weights
+  weights <- sol$solution
+  return(weights)
+}
+
+
+# Example Usage
+# Assuming stockReturns is a matrix/data frame of return series for different stocks
+riskFreeRate <- 0.015  # Example risk-free rate
+optimalWeights <- markowitzOptimization(stockReturns, riskFreeRate)
+print(optimalWeights)
+
+
+```
+
+Mean Variance Frontier
+
+```{r}
+library(quadprog)
+
+# Function for Mean-Variance Frontier
+meanVarianceFrontier <- function(stockReturns, riskFreeRate, targetReturns) {
+  numAssets <- ncol(stockReturns)
+  meanReturns <- colMeans(stockReturns)
+  covReturns <- cov(stockReturns)
+
+  Dmat <- 2 * covReturns
+  dvec <- rep(0, numAssets)
+
+  # Initialize vectors to store the results
+  risks <- numeric(length(targetReturns))
+  weightsList <- vector("list", length(targetReturns))
+
+  for (i in seq_along(targetReturns)) {
+    # Constraints: Sum of weights = 1, All weights >= 0, and Expected return = target return
+    Amat <- rbind(1, diag(numAssets), meanReturns)
+    bvec <- c(1, rep(0, numAssets), targetReturns[i])
+
+    # Solve the optimization problem
+    sol <- solve.QP(Dmat, dvec, t(Amat), bvec, meq = 2)
+
+    # Calculate risk and store the results
+    risks[i] <- sqrt(t(sol$solution) %*% covReturns %*% sol$solution)
+    weightsList[[i]] <- sol$solution
+  }
+
+  # Create a dataframe with the results
+  efficientFrontier <- data.frame(Return = targetReturns, Risk = risks, Weights = weightsList)
+
+  return(efficientFrontier)
+}
+
+# Example Usage
+targetReturns <- seq(from = min(colMeans(stockReturns)), to = max(colMeans(stockReturns)), length.out = 4)
+riskFreeRate <- 0.015 # Example risk-free rate
+frontier <- meanVarianceFrontier(stockReturns, riskFreeRate, targetReturns)
+
+print(frontier)
+
+```
+
+Visualize
+```{r}
+library(ggplot2)
+
+ggplot(frontier, aes(x = Risk, y = Return)) +
+  geom_line(color = "blue") +
+  labs(title = "Mean-Variance Efficient Frontier",
+       x = "Portfolio Risk (Standard Deviation)",
+       y = "Expected Portfolio Return") +
+  theme_minimal()
+
+```
+
+
+```{r}
+# Load the necessary library
+library(quantmod)
+
+# Define the stock symbols
+stocks <- c("AAPL", "TSLA", "GOOG", "MSFT")
+
+# Define the time period for the data
+startDate <- as.Date("2023-01-01")
+endDate <- as.Date("2023-10-31")
+
+# Initialize an empty list to store stock data
+stockData <- list()
+
+# Loop through each stock symbol and download the data
+for (stock in stocks) {
+  stockData[[stock]] <- getSymbols(stock, src = "yahoo", 
+                                   from = startDate, 
+                                   to = endDate, 
+                                   auto.assign = FALSE)
+}
+
+# Initialize an empty list to store stock returns
+stockReturn <- list()
+
+# Loop through each stock symbol and calculate returns
+for (stock in stocks) {
+  tempReturns <- Delt(Ad(stockData[[stock]]))
+  tempReturns[1, ] <- 0  # Set the first day's return to 0
+  stockReturn[[stock]] <- tempReturns
+}
+
+# Merge all return series into a single xts object
+stockReturns <- do.call(merge, stockReturn)
+
+# Print the first few rows of the merged returns
+head(stockReturns)
+```
+
+
+Equally Weighted Portfolio returns are calculated at the beginning of the program.
+
+
+Monte Carlo Optimization Returns
+
+```{r}
+mc_weights <- c(0.381121, 0.117057, 0.043215, 0.458607) 
+
+# Portfolio Returns using custom weights
+mc_portfolioReturns <- Return.portfolio(R = returns, weights = mc_weights)
+
+# Check the first few rows of the portfolio returns
+head(mc_portfolioReturns)
 
 
 ```
 
 
 
+CAPM Optimization Returns
+
+```{r}
+capm_weights <- c(0.73478050, 0.00000000, 0.02356996, 0.24164954) 
+
+# Portfolio Returns using custom weights
+capm_portfolioReturns <- Return.portfolio(R = returns, weights = capm_weights)
+
+# Check the first few rows of the portfolio returns
+head(capm_portfolioReturns)
+
+```
+
+Markowitz Optimization
+
+```{r}
+marko_weights <- c(0.73478019, 0.00000000, 0.02356978, 0.24165003) 
+
+# Portfolio Returns using custom weights
+marko_portfolioReturns <- Return.portfolio(R = returns, weights = marko_weights)
+
+# Check the first few rows of the portfolio returns
+head(marko_portfolioReturns)
+```
+
+Plotting the performance of each portfolio:
+
+```{r}
+library(tidyquant)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+
+# Assuming portfolioReturns is an xts or zoo object
+portfolioReturns_df <- as.data.frame(portfolioReturns)
+portfolioReturns_tibble <- as_tibble(portfolioReturns_df, rownames = "Date")
+
+# Assuming portfolioReturns is an xts or zoo object
+mc_portfolioReturns_df <- as.data.frame(mc_portfolioReturns)
+mc_portfolioReturns_tibble <- as_tibble(mc_portfolioReturns_df, rownames = "Date")
+
+# Assuming portfolioReturns is an xts or zoo object
+capm_portfolioReturns_df <- as.data.frame(capm_portfolioReturns)
+capm_portfolioReturns_tibble <- as_tibble(capm_portfolioReturns_df, rownames = "Date")
+
+# Assuming portfolioReturns is an xts or zoo object
+marko_portfolioReturns_df <- as.data.frame(marko_portfolioReturns)
+marko_portfolioReturns_tibble <- as_tibble(marko_portfolioReturns_df, rownames = "Date")
+
+portfolioReturns_tibble <- portfolioReturns_tibble %>% mutate(Portfolio = "Portfolio 1")
+mc_portfolioReturns_tibble <- mc_portfolioReturns_tibble %>% mutate(Portfolio = "MC Portfolio")
+capm_portfolioReturns_tibble <- capm_portfolioReturns_tibble %>% mutate(Portfolio = "CAPM Portfolio")
+marko_portfolioReturns_tibble <- marko_portfolioReturns_tibble %>% mutate(Portfolio = "Markowitz Portfolio")
+
+
+combinedDf <- bind_rows(
+  portfolioReturns_tibble, 
+  mc_portfolioReturns_tibble, 
+  capm_portfolioReturns_tibble, 
+  marko_portfolioReturns_tibble
+)
+
+longDf <- combinedDf %>% 
+  pivot_longer(-c(Date, Portfolio), names_to = "Variable", values_to = "Value")
+
+
+ggplot(longDf, aes(x = as.Date(Date), y = Value, color = Portfolio)) +
+  geom_line() +
+  labs(title = "Comparison of Portfolio Performance",
+       x = "Date",
+       y = "Returns") +
+  theme_minimal()
 
 
 
-
-
+```
 
 
