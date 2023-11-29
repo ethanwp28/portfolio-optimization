@@ -139,15 +139,6 @@ stocks <- c("AAPL","MSFT", "GE", "LMT", "PFE", "NVO", "AMZN", "TSLA", "WFC", "BL
 startDate <- as.Date("2018-01-01")
 endDate <- as.Date("2022-10-31")
 
-stockData <- list()
-
-for (stock in stocks) {
-  stockData[[stock]] <- getSymbols(stock, src = "yahoo", 
-                                   from = startDate, 
-                                   to = endDate, 
-                                   auto.assign = FALSE)
-}
-
 stockReturns <- list()
 
 for (stock in stocks) {
@@ -268,6 +259,8 @@ print(optimalWeights)
 
 ```
 
+(I also have a black litterman function i want to add here when I figure it out)
+
 Mean Variance Frontier
 
 ```{r}
@@ -316,6 +309,55 @@ ggplot(frontier, aes(x = Risk, y = Return)) +
   theme_minimal()
 
 ```
+
+Black-Litterman
+
+```{r}
+library(BLCOP)
+
+# Function to perform Black-Litterman optimization using BLCOP package
+blackLittermanBLCOP <- function(marketCaps, viewsMatrix, views, confidences, riskFreeRate, marketReturn, covMatrix) {
+  # Convert market capitalizations to a market capitalization vector
+  capVector <- as.numeric(marketCaps / sum(marketCaps))
+  
+  # Create the BLViews object
+  BLViews <- BLViews(viewsMatrix, views, confidences)
+  
+  # Create the market prior
+  prior <- marketPrior(returnVector = marketReturn, 
+                       riskFreeRate = riskFreeRate, 
+                       covMatrix = covMatrix, 
+                       capWeight = capVector)
+  
+  # Combine views and prior
+  posterior <- posteriorEst(BLViews, prior)
+  
+  # Perform optimization
+  optimizedPortfolio <- optimalPortfolios(posterior, 
+                                          constraints = "LongOnly", 
+                                          rf = riskFreeRate)
+  
+  # Return the optimized portfolio weights
+  return(optimizedPortfolio$weights)
+}
+
+# Example usage:
+# Assume marketCaps, viewsMatrix, views, confidences, riskFreeRate, marketReturn, and covMatrix are already defined
+# marketCaps: Named vector of market capitalizations for each asset
+# viewsMatrix: Matrix specifying the assets involved in each view (P matrix)
+# views: Vector of the investor's views (Q vector)
+# confidences: Vector of the investor's confidences in their views
+# riskFreeRate: Risk-free rate for the CAPM model
+# marketReturn: Vector of expected market returns (Pi vector)
+# covMatrix: Covariance matrix of asset returns (Sigma matrix)
+
+# optimizedWeights <- blackLittermanBLCOP(marketCaps, viewsMatrix, views, confidences, riskFreeRate, marketReturn, covMatrix)
+
+  
+```
+
+
+
 
 Next, we pull in data from after our historical period to test each portfolio against:
 (Note, important to run this chunk again to overwrite the original (historical) data from the previous chunks)
@@ -424,6 +466,12 @@ mc_portfolioReturns_tibble <- mc_portfolioReturns_tibble %>% mutate(Portfolio = 
 capm_portfolioReturns_tibble <- capm_portfolioReturns_tibble %>% mutate(Portfolio = "CAPM Portfolio") %>% rename(Returns = portfolio.returns)
 marko_portfolioReturns_tibble <- marko_portfolioReturns_tibble %>% mutate(Portfolio = "Markowitz Portfolio") %>% rename(Returns = portfolio.returns)
 
+combinedDf <- bind_rows(
+    portfolioReturns_tibble, 
+    mc_portfolioReturns_tibble, 
+    capm_portfolioReturns_tibble, 
+    marko_portfolioReturns_tibble
+)
 
 # Define a color palette
 color_palette <- c("Portfolio 1" = "blue", 
@@ -432,12 +480,9 @@ color_palette <- c("Portfolio 1" = "blue",
                    "Markowitz Portfolio" = "purple")
 
 ggplot(combinedDf, aes(x = as.Date(Date), y = Returns, color = Portfolio)) +
-  geom_line(size = 0.5) +
-  scale_color_manual(values = color_palette) +
-  facet_wrap(~Portfolio, scales = "free_y") +
-  labs(title = "Performance of Portfolios", x = "Date", y = "Returns") +
-  theme_minimal()
-
+    geom_line() +
+    labs(title = "Comparison of Portfolio Performance", x = "Date", y = "Returns") +
+    theme_minimal()
 
 
 ```
@@ -534,6 +579,10 @@ print(paste("Beta for Portfolio 4:", beta4))
 
 Calculate each portfolio's Alpha value:
 
+(commented out until I figure this piece out)
+
+
+
 ```{r}
 
 calculate_alpha1 <- function(portfolioReturns, beta1, marketReturn, riskFreeRate) {
@@ -548,20 +597,32 @@ calculate_alpha1 <- function(portfolioReturns, beta1, marketReturn, riskFreeRate
 
 
 calculate_alpha2 <- function(mc_portfolioReturns, beta2, marketReturn, riskFreeRate) {
-    expectedReturn <- riskFreeRate + beta2 * (marketReturn - riskFreeRate)
-    alpha <- mean(mc_portfolioReturns) - expectedReturn
+    averagePortfolioReturn <- mean(mc_portfolioReturns)
+    averageMarketReturn <- mean(marketReturn)
+
+    expectedReturn <- riskFreeRate + beta1 * (averageMarketReturn - riskFreeRate)
+    alpha <- averagePortfolioReturn - expectedReturn
+
     return(alpha)
 }
 
 calculate_alpha3 <- function(capm_portfolioReturns, beta3, marketReturn, riskFreeRate) {
-    expectedReturn <- riskFreeRate + beta3 * (marketReturn - riskFreeRate)
-    alpha <- mean(capm_portfolioReturns) - expectedReturn
+    averagePortfolioReturn <- mean(capm_portfolioReturns)
+    averageMarketReturn <- mean(marketReturn)
+
+    expectedReturn <- riskFreeRate + beta1 * (averageMarketReturn - riskFreeRate)
+    alpha <- averagePortfolioReturn - expectedReturn
+
     return(alpha)
 }
 
 calculate_alpha4 <- function(marko_portfolioReturns, beta4, marketReturn, riskFreeRate) {
-    expectedReturn <- riskFreeRate + beta4 * (marketReturn - riskFreeRate)
-    alpha <- mean(marko_portfolioReturns) - expectedReturn
+    averagePortfolioReturn <- mean(marko_portfolioReturns)
+    averageMarketReturn <- mean(marketReturn)
+
+    expectedReturn <- riskFreeRate + beta1 * (averageMarketReturn - riskFreeRate)
+    alpha <- averagePortfolioReturn - expectedReturn
+
     return(alpha)
 }
 
@@ -582,14 +643,7 @@ alpha_data <- data.frame(
   Alpha = c(alpha1, alpha2, alpha3, alpha4)
 )
 
-# Print column names
-print(names(alpha_data))
-print(alpha1)
 
-# Print the entire data frame
-print(alpha_data)
-
-# Basic ggplot call
 ggplot(alpha_data, aes(x = Portfolio, y = Alpha)) + 
   geom_bar(stat = "identity")
 
