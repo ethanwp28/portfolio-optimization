@@ -13,6 +13,7 @@ Install necessary packages:
 
 ```{r}
 # install.packages("quantmod")
+# install.packages("PortfolioAnalytics")
 # install.packages("PerformanceAnalytics")
 # install.packages("tseries")
 # install.packages("R.matlab")
@@ -26,6 +27,7 @@ Load Libraries:
 ```{r}
 library(quantmod)
 library(PerformanceAnalytics)
+library(PortfolioAnalytics)
 library(xts)
 library(tseries)
 library(quadprog)
@@ -42,7 +44,7 @@ The first step is to pull in the historical stock data that we will use to creat
 stocks <- c("AAPL","MSFT", "GE", "LMT", "PFE", "NVO", "AMZN", "TSLA", "WFC", "BLK")
 
 startDate <- as.Date("2018-01-01")
-endDate <- as.Date("2022-10-31")
+endDate <- as.Date("2022-12-31")
 
 stockData <- list()
 
@@ -89,13 +91,44 @@ CVaR_Historical <- ES(portfolioReturns, p = confidenceLevel, method = "historica
 cat("Historical VaR at", confidenceLevel*100, "% confidence level is:", VaR_Historical, "\n")
 cat("Historical CVaR at", confidenceLevel*100, "% confidence level is:", CVaR_Historical, "\n")
 ```
+## Commented out until I figure this piece out
+
+CVaR/VaR Portfolio Optimization
+
+``{r}
+library(PortfolioAnalytics)
+library(PerformanceAnalytics)
+
+
+# Create a portfolio specification
+portfolio <- portfolio.spec(assets = colnames(portfolioReturns))
+
+# Add constraints
+add.constraint(portfolio, type = "full_investment")
+add.constraint(portfolio, type = "box", min = 0.01, max = 0.2)
+
+# Set up the objective: Here, we are minimizing risk (CVaR or VaR)
+add.objective(portfolio, type = "risk", name = "VaR", p = confidenceLevel)
+# or use CVaR
+# add.objective(portfolio, type = "risk", name = "CVaR", p = confidenceLevel)
+
+# Define the optimization parameters and optimize
+opt <- optimize.portfolio(R = portfolioReturns, portfolio = portfolio, optimize_method = "random")
+weights <- extractWeights(opt)
+
+# Print the optimal weights
+print(weights)
+
+``
+
+
 
 Next we will run a Monte Carlo simulation:
 
 ```{r}
 monteCarloOptimization <- function(returns, numPortfolios = 10000) {
   numAssets <- ncol(returns)
-  results <- matrix(0, nrow = numPortfolios, ncol = 3 + numAssets)  # Extend matrix to store weights
+  results <- matrix(0, nrow = numPortfolios, ncol = 3 + numAssets)
   
   colnames(results) <- c("Return", "Risk", "Sharpe", paste("Weight", 1:numAssets, sep = "_"))
 
@@ -137,7 +170,7 @@ Next, we will do CAPM optimization. First, calculate the stock returns for furth
 stocks <- c("AAPL","MSFT", "GE", "LMT", "PFE", "NVO", "AMZN", "TSLA", "WFC", "BLK")
 
 startDate <- as.Date("2018-01-01")
-endDate <- as.Date("2022-10-31")
+endDate <- as.Date("2022-12-31")
 
 stockReturns <- list()
 
@@ -259,8 +292,6 @@ print(optimalWeights)
 
 ```
 
-(I also have a black litterman function i want to add here when I figure it out)
-
 Mean Variance Frontier
 
 ```{r}
@@ -317,31 +348,26 @@ library(BLCOP)
 
 # Function to perform Black-Litterman optimization using BLCOP package
 blackLittermanBLCOP <- function(marketCaps, viewsMatrix, views, confidences, riskFreeRate, marketReturn, covMatrix) {
-  # Convert market capitalizations to a market capitalization vector
+
   capVector <- as.numeric(marketCaps / sum(marketCaps))
-  
-  # Create the BLViews object
+
   BLViews <- BLViews(viewsMatrix, views, confidences)
   
-  # Create the market prior
   prior <- marketPrior(returnVector = marketReturn, 
                        riskFreeRate = riskFreeRate, 
                        covMatrix = covMatrix, 
                        capWeight = capVector)
-  
-  # Combine views and prior
+
   posterior <- posteriorEst(BLViews, prior)
   
-  # Perform optimization
   optimizedPortfolio <- optimalPortfolios(posterior, 
                                           constraints = "LongOnly", 
                                           rf = riskFreeRate)
-  
-  # Return the optimized portfolio weights
+
   return(optimizedPortfolio$weights)
 }
 
-# Example usage:
+:
 # Assume marketCaps, viewsMatrix, views, confidences, riskFreeRate, marketReturn, and covMatrix are already defined
 # marketCaps: Named vector of market capitalizations for each asset
 # viewsMatrix: Matrix specifying the assets involved in each view (P matrix)
@@ -415,7 +441,7 @@ Monte Carlo Optimization Returns
 (get weights from function return)
 
 ```{r}
-mc_weights <- c(0.21859, 0.08281, 0.188986, 0.01652, 0.000796, 0.19554, 0.098302, 0.108662, 0.036544, 0.053249)
+mc_weights <- c(0.112527, 0.029046, 0.009831, 0.160358, 0.148462, 0.249153, 0.057023, 0.19032, 0.013832, 0.029449)
 
 mc_portfolioReturns <- Return.portfolio(R = returns, weights = mc_weights)
 
@@ -426,7 +452,7 @@ tail(mc_portfolioReturns)
 CAPM Optimization Returns
 
 ```{r}
-capm_weights <- c(0.0000000000000000000000000, -0.0000000000000000001094735, 0.0174175751737773581995228, 0.2708490891210338369354815, 0.2682027762553574334880579, 0.2935597422412994927931607, 0.1279711440899859720143894, 0.0021415150238913334412860, 0.0198581580946546529253816, -0.0000000000000000160630695) 
+capm_weights <- c(0.000000000000000000000000, -0.000000000000000007382958, 0.018969510493666276451652, 0.274436055406806989065416, 0.268356790241639608929347, 0.292832009112154789676197, 0.120756681143701527503254, 0.002387046127510850275499, 0.022261907474519945088209, 0.000000000000000027634046) 
 
 capm_portfolioReturns <- Return.portfolio(R = returns, weights = capm_weights)
 
@@ -437,13 +463,25 @@ tail(capm_portfolioReturns)
 Markowitz Optimization
 
 ```{r}
-marko_weights <- c(0.0000000000000000000000000, -0.0000000000000000001094735, 0.0174175751737773581995228, 0.2708490891210338369354815, 0.2682027762553574334880579, 0.2935597422412994927931607,
-0.1279711440899859720143894, 0.0021415150238913334412860, 0.0198581580946546529253816, -0.0000000000000000160630695) 
+marko_weights <- c(0.000000000000000000000000, -0.000000000000000007382958, 0.018969510493666276451652, 0.274436055406806989065416, 0.268356790241639608929347, 0.292832009112154789676197, 0.120756681143701527503254, 0.002387046127510850275499, 0.022261907474519945088209, 0.000000000000000027634046) 
 
 marko_portfolioReturns <- Return.portfolio(R = returns, weights = marko_weights)
 
 tail(marko_portfolioReturns)
 ```
+
+
+Black-Litterman Optimization (derived from python program)
+
+```{r}
+bl_weights <- c(0.190115, 0.192838, -0.120683, 0.096994, 0.102764, 0.226134, 0.022817, 0.356373, -0.080452, 0.054896)
+
+bl_portfolioReturns <- Return.portfolio(R = returns, weights = mc_weights)
+
+tail(bl_portfolioReturns)
+```
+
+
 
 Plotting the performance of each portfolio:
 
@@ -461,23 +499,29 @@ capm_portfolioReturns_tibble <- as_tibble(capm_portfolioReturns_df, rownames = "
 marko_portfolioReturns_df <- as.data.frame(marko_portfolioReturns)
 marko_portfolioReturns_tibble <- as_tibble(marko_portfolioReturns_df, rownames = "Date")
 
-portfolioReturns_tibble <- portfolioReturns_tibble %>% mutate(Portfolio = "Portfolio 1") %>% rename(Returns = portfolio.returns)
+bl_portfolioReturns_df <- as.data.frame(bl_portfolioReturns)
+bl_portfolioReturns_tibble <- as_tibble(marko_portfolioReturns_df, rownames = "Date")
+
+portfolioReturns_tibble <- portfolioReturns_tibble %>% mutate(Portfolio = "Equal Weight") %>% rename(Returns = portfolio.returns)
 mc_portfolioReturns_tibble <- mc_portfolioReturns_tibble %>% mutate(Portfolio = "MC Portfolio") %>% rename(Returns = portfolio.returns)
 capm_portfolioReturns_tibble <- capm_portfolioReturns_tibble %>% mutate(Portfolio = "CAPM Portfolio") %>% rename(Returns = portfolio.returns)
 marko_portfolioReturns_tibble <- marko_portfolioReturns_tibble %>% mutate(Portfolio = "Markowitz Portfolio") %>% rename(Returns = portfolio.returns)
+bl_portfolioReturns_tibble <- bl_portfolioReturns_tibble %>% mutate(Portfolio = "Black Litterman Portfolio") %>% rename(Returns = portfolio.returns)
 
 combinedDf <- bind_rows(
     portfolioReturns_tibble, 
     mc_portfolioReturns_tibble, 
     capm_portfolioReturns_tibble, 
-    marko_portfolioReturns_tibble
+    marko_portfolioReturns_tibble,
+    bl_portfolioReturns_tibble
 )
 
 # Define a color palette
-color_palette <- c("Portfolio 1" = "blue", 
+color_palette <- c("Equal Wight" = "blue", 
                    "MC Portfolio" = "green", 
                    "CAPM Portfolio" = "red", 
-                   "Markowitz Portfolio" = "purple")
+                   "Markowitz Portfolio" = "purple",
+                   "Black Litterman Portfolio" = "yellow")
 
 ggplot(combinedDf, aes(x = as.Date(Date), y = Returns, color = Portfolio)) +
     geom_line() +
@@ -494,16 +538,18 @@ variance1 <- var(portfolioReturns, na.rm = TRUE)
 variance2 <- var(mc_portfolioReturns, na.rm = TRUE)
 variance3 <- var(capm_portfolioReturns, na.rm = TRUE)
 variance4 <- var(marko_portfolioReturns, na.rm = TRUE)
+variance5 <- var(bl_portfolioReturns, na.rm = TRUE)
 
 variance_data <- data.frame(
-  Portfolio = c("Equally Weighted", "Monte Carlo", "CAPM", "Markowitz"), 
-  Variance = c(variance1, variance2, variance3, variance4)
+  Portfolio = c("Equally Weighted", "Monte Carlo", "CAPM", "Markowitz", "Black Litterman"), 
+  Variance = c(variance1, variance2, variance3, variance4, variance5)
 )
 
 print(paste("Variance for Portfolio 1:", variance1))
 print(paste("Variance for Portfolio 2:", variance2))
 print(paste("Variance for Portfolio 3:", variance3))
 print(paste("Variance for Portfolio 4:", variance4))
+print(paste("Variance for Portfolio 5:", variance5))
 
 variance_data$Variance <- variance_data$Variance * 100
 
@@ -540,7 +586,7 @@ if (is.null(sp500Data)) {
 
 ```
 
-
+Next, calculate the Beta
 
 ```{r}
 calculate_beta1 <- function(portfolioReturns, marketReturn) {
@@ -563,24 +609,41 @@ calculate_beta4 <- function(marko_portfolioReturns, marketReturn) {
     return(coef(model)[2])
 }
 
+calculate_beta5 <- function(bl_portfolioReturns, marketReturn) {
+    model <- lm(bl_portfolioReturns ~ marketReturn)
+    return(coef(model)[2])
+}
+
 
 beta1 <- calculate_beta1(portfolioReturns, marketReturn)
 beta2 <- calculate_beta2(mc_portfolioReturns, marketReturn)
 beta3 <- calculate_beta3(capm_portfolioReturns, marketReturn)
 beta4 <- calculate_beta4(marko_portfolioReturns, marketReturn)
+beta5 <- calculate_beta5(bl_portfolioReturns, marketReturn)
 
 print(paste("Beta for Portfolio 1:", beta1))
 print(paste("Beta for Portfolio 2:", beta2))
 print(paste("Beta for Portfolio 3:", beta3))
 print(paste("Beta for Portfolio 4:", beta4))
+print(paste("Beta for Portfolio 5:", beta5))
 
+
+beta_df <- data.frame(
+    Portfolio = c("Equal Weight", "MC Portfolio", "CAPM Portfolio", "Markowitz Portfolio", "Black Litterman Portfolio"),
+    Beta = c(beta1, beta2, beta3, beta4, beta5)
+)
+
+
+ggplot(beta_df, aes(x = Portfolio, y = Beta, fill = Portfolio)) +
+    geom_bar(stat = "identity") +
+    theme_minimal() +
+    labs(title = "Beta Values of Different Portfolios",
+         x = "Portfolio",
+         y = "Beta")
 
 ```
 
 Calculate each portfolio's Alpha value:
-
-(commented out until I figure this piece out)
-
 
 
 ```{r}
@@ -626,27 +689,49 @@ calculate_alpha4 <- function(marko_portfolioReturns, beta4, marketReturn, riskFr
     return(alpha)
 }
 
+calculate_alpha5 <- function(bl_portfolioReturns, beta5, marketReturn, riskFreeRate) {
+    averagePortfolioReturn <- mean(bl_portfolioReturns)
+    averageMarketReturn <- mean(marketReturn)
+
+    expectedReturn <- riskFreeRate + beta1 * (averageMarketReturn - riskFreeRate)
+    alpha <- averagePortfolioReturn - expectedReturn
+
+    return(alpha)
+}
+
 alpha1 <- calculate_alpha1(portfolioReturns, beta1, marketReturn, riskFreeRate)
 alpha2 <- calculate_alpha2(mc_portfolioReturns, beta2, marketReturn, riskFreeRate)
 alpha3 <- calculate_alpha3(capm_portfolioReturns, beta3, marketReturn, riskFreeRate)
 alpha4 <- calculate_alpha4(marko_portfolioReturns, beta4, marketReturn, riskFreeRate)
+alpha5 <- calculate_alpha4(bl_portfolioReturns, beta4, marketReturn, riskFreeRate)
 
-print(paste("Alpha for Portfolio 1:", alpha1))
-print(paste("Alpha for MC Portfolio:", alpha2))
-print(paste("Alpha for CAPM Portfolio:", alpha3))
-print(paste("Alpha for Markowitz Portfolio:", alpha4))
 
-# Visualizing Alpha:
+# Convert alphas to percentages
+alpha1_percent <- alpha1 * 100
+alpha2_percent <- alpha2 * 100
+alpha3_percent <- alpha3 * 100
+alpha4_percent <- alpha4 * 100
+alpha5_percent <- alpha5 * 100
+
+
+print(paste("Alpha for Equal Weight:", alpha1_percent, "%"))
+print(paste("Alpha for MC Portfolio:", alpha2_percent, "%"))
+print(paste("Alpha for CAPM Portfolio:", alpha3_percent, "%"))
+print(paste("Alpha for Markowitz Portfolio:", alpha4_percent, "%"))
+print(paste("Alpha for Black Litterman Portfolio:", alpha5_percent, "%"))
+
+# Visualizing Alpha
 
 alpha_data <- data.frame(
-  Portfolio = c("Equally Weighted", "Monte Carlo", "CAPM", "Markowitz"), 
-  Alpha = c(alpha1, alpha2, alpha3, alpha4)
+  Portfolio = c("Equal Weight", "MC Portfolio", "CAPM Portfolio", "Markowitz Portfolio", "Black Litterman Portfolio"), 
+  Alpha = c(alpha1_percent, alpha2_percent, alpha3_percent, alpha4_percent, alpha5_percent)
 )
 
-
-ggplot(alpha_data, aes(x = Portfolio, y = Alpha)) + 
-  geom_bar(stat = "identity")
-
+ggplot(alpha_data, aes(x = Portfolio, y = Alpha, fill = Portfolio)) + 
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "Set1") +  # Adding color
+  labs(title = "Alpha Values of Different Portfolios", y = "Alpha (%)", x = "") +
+  theme_minimal()
 
 ```
 
@@ -659,21 +744,24 @@ totalReturn1 <- cumprod(1 + portfolioReturns) - 1
 totalReturn2 <- cumprod(1 + mc_portfolioReturns) - 1
 totalReturn3 <- cumprod(1 + capm_portfolioReturns) - 1
 totalReturn4 <- cumprod(1 + marko_portfolioReturns) - 1
+totalReturn5 <- cumprod(1 + bl_portfolioReturns) - 1
 
 finalReturn1 <- investment * (1 + as.numeric(last(totalReturn1)))
 finalReturn2 <- investment * (1 + as.numeric(last(totalReturn2)))
 finalReturn3 <- investment * (1 + as.numeric(last(totalReturn3)))
 finalReturn4 <- investment * (1 + as.numeric(last(totalReturn4)))
+finalReturn5 <- investment * (1 + as.numeric(last(totalReturn5)))
 
 returns_data <- data.frame(
-  Portfolio = c("Equally Weighted", "Monte Carlo", "CAPM", "Markowitz"),
-  FinalValue = c(finalReturn1, finalReturn2, finalReturn3, finalReturn4)
+  Portfolio = c("Equally Weighted", "Monte Carlo", "CAPM", "Markowitz", "Black Litterman"),
+  FinalValue = c(finalReturn1, finalReturn2, finalReturn3, finalReturn4, finalReturn5)
 )
 
 print(finalReturn1)
 print(finalReturn2)
 print(finalReturn3)
 print(finalReturn4)
+print(finalReturn5)
 
 ggplot(returns_data, aes(x = Portfolio, y = FinalValue, fill = Portfolio)) +
   geom_bar(stat = "identity") +
@@ -685,37 +773,5 @@ ggplot(returns_data, aes(x = Portfolio, y = FinalValue, fill = Portfolio)) +
   scale_y_continuous(labels = scales::dollar_format())
 
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
