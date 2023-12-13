@@ -1,0 +1,63 @@
+---
+title: "black litterman v2"
+author: "Ethan Pinto"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+library(quadprog)
+
+# Function for Black-Litterman Optimization
+blackLittermanOptimization <- function(stockReturns, marketCapWeights, riskFreeRate, tau, P, Q, Omega) {
+  numAssets <- ncol(stockReturns)
+  meanReturns <- colMeans(stockReturns)
+  covReturns <- cov(stockReturns)
+
+  # Calculate market implied risk premium and equilibrium returns
+  marketImpliedRiskPremium <- meanReturns - riskFreeRate
+  equilibriumReturns <- riskFreeRate + marketCapWeights * marketImpliedRiskPremium
+
+  # Calculate the posterior return using Black-Litterman formula
+  invCovReturns <- solve(covReturns)
+  M <- t(P) %*% solve(Omega) %*% P + invCovReturns / tau
+  adjustedReturns <- solve(M) %*% (t(P) %*% solve(Omega) %*% Q + invCovReturns / tau %*% equilibriumReturns)
+
+  # Markowitz optimization with adjusted returns
+  Dmat <- 2 * covReturns
+  dvec <- rep(0, numAssets)
+  Amat <- cbind(1, diag(numAssets))
+  bvec <- c(1, rep(0, numAssets))
+
+  sol <- solve.QP(Dmat, dvec, t(Amat), bvec, meq = 1)
+
+  # Extract weights
+  weights <- sol$solution
+  return(weights)
+}
+
+# Example Usage
+# marketCapWeights: market capitalization weights of assets
+# tau: scalar indicating the uncertainty of the CAPM
+# P: matrix that identifies the assets involved in the views
+# Q: vector of views
+# Omega: matrix representing the uncertainty of the views
+marketCapWeights <- ... # Define your market cap weights
+tau <- 0.025 # Example tau value
+P <- ... # Define P matrix for your views
+Q <- ... # Define Q vector for your views
+Omega <- ... # Define Omega matrix for your views
+riskFreeRate <- 0.015 # Example risk-free rate
+
+optimalWeights <- blackLittermanOptimization(stockReturns, marketCapWeights, riskFreeRate, tau, P, Q, Omega)
+print(optimalWeights)
+
+```
+
+

@@ -1,0 +1,137 @@
+---
+title: "black litterman"
+author: "Ethan Pinto"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+# Load necessary libraries
+library(quadprog) # for portfolio optimization
+library(ggplot2)  # for plotting
+
+# Load data
+sectors <- readRDS('sectors.rds')   # Assuming the .mat file is converted to an R data format
+covariance_asset <- readRDS('cov_asset.rds')
+
+# Set risk aversion parameter
+lambda <- 5.1918
+
+# Calculate portfolio risk
+port_variance <- t(sectors$weights) %*% covariance_asset %*% sectors$weights
+port_vol <- sqrt(port_variance)
+
+# Calculate expected returns
+sectors$exp_rtns <- lambda * covariance_asset %*% sectors$weights
+
+# Calculate asset level risk
+sectors$variance <- diag(covariance_asset)
+sectors$vol <- sqrt(sectors$variance)
+
+# Efficient Frontier Plotting (custom implementation required)
+# This part needs a custom implementation in R or use of a suitable package.
+
+# Black-Litterman Model Adjustments
+P <- matrix(0, nrow = 3, ncol = 10)
+Q <- matrix(0, nrow = 3, ncol = 1)
+
+# Views
+P[1, 8] <- 1
+Q[1] <- 0.15
+P[2, 5] <- 1; P[2, 6] <- -1
+Q[2] <- 0.06
+P[3, 1:2] <- 0.5; P[3, 10] <- -1
+Q[3] <- 0.1
+
+# Set tau and omega
+tau <- 0.5
+omega <- matrix(c(0.1, 0, 0, 0, 0.3, 0, 0, 0, 0.4), nrow = 3, byrow = TRUE)
+
+# Create new mu and sigma
+Mu_BL <- sectors$exp_rtns + tau * covariance_asset %*% solve(t(P) %*% solve(tau * P %*% covariance_asset %*% t(P) + omega) %*% (Q - P %*% sectors$exp_rtns))
+Sig_BL <- (1 + tau) * covariance_asset - tau^2 * covariance_asset %*% t(P) %*% solve(tau * P %*% covariance_asset %*% t(P) + omega) %*% P %*% covariance_asset
+
+# Plotting Black-Litterman Efficient Frontier (custom implementation required)
+# Again, this needs a custom implementation or use of a suitable package.
+
+# Note: The plotting functions and the EfficientFrontier function are not directly convertible to R. 
+# You need a custom implementation or a suitable R package for these parts.
+
+```
+
+```{r}
+EfficientFrontier <- function(NumPortf, EstimatedCovariance, ExpectedValues) {
+  # Number of assets
+  NumAssets <- ncol(EstimatedCovariance)
+  
+  # Determine return of minimum-risk portfolio
+  FirstDegree <- rep(0, NumAssets)
+  SecondDegree <- EstimatedCovariance
+  Aeq <- matrix(1, nrow = 1, ncol = NumAssets)
+  beq <- 1
+  A <- diag(NumAssets) * -1
+  b <- rep(0, NumAssets)
+  x0 <- rep(1/NumAssets, NumAssets)
+  Dmat <- SecondDegree
+  dvec <- FirstDegree
+  Amat <- rbind(A, Aeq)
+  bvec <- c(b, beq)
+  meq <- 1
+  MinVol_Weights <- solve.QP(Dmat, dvec, Amat, bvec, meq)$solution
+  MinVol_Return <- sum(MinVol_Weights * ExpectedValues)
+  
+  # Determine return of maximum-return portfolio
+  MaxRet_Return <- max(ExpectedValues)
+  
+  # Slice efficient frontier
+  TargetReturns <- seq(MinVol_Return, MaxRet_Return, length.out = NumPortf)
+  
+  # Compute the compositions and risk-return coordinates
+  Composition <- matrix(nrow = NumPortf, ncol = NumAssets)
+  Volatility <- numeric(NumPortf)
+  ExpectedReturn <- numeric(NumPortf)
+  
+  for (i in 1:NumPortf) {
+    WMaxRet <- (TargetReturns[i] - min(ExpectedValues)) / (max(ExpectedValues) - min(ExpectedValues))
+    WMinRet <- 1 - WMaxRet
+    x0 <- numeric(NumAssets)
+    x0[which.max(ExpectedValues)] <- WMaxRet
+    x0[which.min(ExpectedValues)] <- WMinRet
+    Weights <- solve.QP(Dmat, dvec, Amat, c(b, TargetReturns[i]), meq)$solution
+    Composition[i, ] <- Weights
+    Volatility[i] <- sqrt(sum(Weights * EstimatedCovariance %*% Weights))
+    ExpectedReturn[i] <- TargetReturns[i]
+  }
+  
+  list(ExpectedReturn = ExpectedReturn, Volatility = Volatility, Composition = Composition)
+}
+
+results <- EfficientFrontier(NumPortf, EstimatedCovariance, ExpectedValues)
+
+print("Expected Returns:")
+print(results$ExpectedReturn)
+
+print("Volatilities:")
+print(results$Volatility)
+
+print("Compositions:")
+print(results$Composition)
+
+efficient_frontier_data <- data.frame(Volatility = results$Volatility, ExpectedReturn = results$ExpectedReturn)
+
+ggplot(efficient_frontier_data, aes(x = Volatility, y = ExpectedReturn)) +
+  geom_point() +
+  theme_minimal() +
+  labs(title = "Efficient Frontier",
+       x = "Volatility (Standard Deviation)",
+       y = "Expected Return") +
+  geom_line() # to connect points
+
+```
+

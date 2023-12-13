@@ -1,0 +1,157 @@
+---
+title: "markowitz"
+author: "Ethan Pinto"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# Load the necessary library
+library(quantmod)
+
+# Define the stock symbols
+stocks <- c("AAPL", "TSLA", "GOOG", "MSFT")
+
+# Define the time period for the data
+startDate <- as.Date("2023-01-01")
+endDate <- as.Date("2023-10-31")
+
+# Initialize an empty list to store stock data
+stockData <- list()
+
+# Loop through each stock symbol and download the data
+for (stock in stocks) {
+  stockData[[stock]] <- getSymbols(stock, src = "yahoo", 
+                                   from = startDate, 
+                                   to = endDate, 
+                                   auto.assign = FALSE)
+}
+
+# Initialize an empty list to store stock returns
+stockReturn <- list()
+
+# Loop through each stock symbol and calculate returns
+for (stock in stocks) {
+  tempReturns <- Delt(Ad(stockData[[stock]]))
+  tempReturns[1, ] <- 0  # Set the first day's return to 0
+  stockReturn[[stock]] <- tempReturns
+}
+
+# Merge all return series into a single xts object
+stockReturns <- do.call(merge, stockReturn)
+
+# Print the first few rows of the merged returns
+head(stockReturns)
+
+```
+
+
+
+```{r}
+library(quadprog)
+
+markowitzOptimization <- function(stockReturns, riskFreeRate) {
+  numAssets <- ncol(stockReturns)
+
+  # Calculate the mean and covariance of returns
+  meanReturns <- colMeans(stockReturns)
+  covReturns <- cov(stockReturns)
+
+  # Create Dmat and dvec for quadprog
+  Dmat <- 2 * covReturns
+  dvec <- rep(0, numAssets)
+
+  if (!is.matrix(Dmat) || nrow(Dmat) != ncol(Dmat) || nrow(Dmat) != length(dvec)) {
+    stop("Dmat or dvec dimension error")
+  }
+
+  # Constraints: Sum of weights = 1, and All weights >= 0
+  Amat <- rbind(1, diag(numAssets))
+  bvec <- c(1, rep(0, numAssets))
+
+  if (ncol(Amat) != length(dvec) || nrow(Amat) != length(bvec)) {
+    stop("Amat or bvec dimension error")
+  }
+
+  # Solve the quadratic programming problem
+  sol <- solve.QP(Dmat, dvec, t(Amat), bvec, meq = 1)
+
+  # Extract the weights
+  weights <- sol$solution
+  return(weights)
+}
+
+
+# Example Usage
+# Assuming stockReturns is a matrix/data frame of return series for different stocks
+riskFreeRate <- 0.015  # Example risk-free rate
+optimalWeights <- markowitzOptimization(stockReturns, riskFreeRate)
+print(optimalWeights)
+
+
+```
+
+Mean Variance
+
+```{r}
+library(quadprog)
+
+# Function for Mean-Variance Frontier
+meanVarianceFrontier <- function(stockReturns, riskFreeRate, targetReturns) {
+  numAssets <- ncol(stockReturns)
+  meanReturns <- colMeans(stockReturns)
+  covReturns <- cov(stockReturns)
+
+  Dmat <- 2 * covReturns
+  dvec <- rep(0, numAssets)
+
+  # Initialize vectors to store the results
+  risks <- numeric(length(targetReturns))
+  weightsList <- vector("list", length(targetReturns))
+
+  for (i in seq_along(targetReturns)) {
+    # Constraints: Sum of weights = 1, All weights >= 0, and Expected return = target return
+    Amat <- rbind(1, diag(numAssets), meanReturns)
+    bvec <- c(1, rep(0, numAssets), targetReturns[i])
+
+    # Solve the optimization problem
+    sol <- solve.QP(Dmat, dvec, t(Amat), bvec, meq = 2)
+
+    # Calculate risk and store the results
+    risks[i] <- sqrt(t(sol$solution) %*% covReturns %*% sol$solution)
+    weightsList[[i]] <- sol$solution
+  }
+
+  # Create a dataframe with the results
+  efficientFrontier <- data.frame(Return = targetReturns, Risk = risks, Weights = weightsList)
+
+  return(efficientFrontier)
+}
+
+# Example Usage
+targetReturns <- seq(from = min(colMeans(stockReturns)), to = max(colMeans(stockReturns)), length.out = 4)
+riskFreeRate <- 0.015 # Example risk-free rate
+frontier <- meanVarianceFrontier(stockReturns, riskFreeRate, targetReturns)
+
+print(frontier)
+
+```
+
+Visualize
+```{r}
+library(ggplot2)
+
+ggplot(frontier, aes(x = Risk, y = Return)) +
+  geom_line(color = "blue") +
+  labs(title = "Mean-Variance Efficient Frontier",
+       x = "Portfolio Risk (Standard Deviation)",
+       y = "Expected Portfolio Return") +
+  theme_minimal()
+
+```
+

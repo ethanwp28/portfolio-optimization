@@ -1,0 +1,171 @@
+---
+title: "Portfolio Optimization"
+author: "Ethan Pinto"
+date: "2023-11-24"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Install necessary packages:
+
+```{r}
+# install.packages("quantmod")
+# install.packages("PerformanceAnalytics")
+# install.packages("tseries")
+# install.packages("R.matlab")
+# install.packages("tidyquant")
+# install.packages("tidyr")
+# install.packages("dplyr")
+```
+
+
+The first step is to pull in stock data that we will use to create our portfolio
+
+```{r}
+
+# Load the necessary library
+library(quantmod)
+
+# Define the stock symbols
+stocks <- c("AAPL","TSLA","GOOG","MSFT")
+
+# Define the time period for the data
+startDate <- as.Date("2023-01-04")
+endDate <- as.Date("2023-10-31")
+
+# Initialize an empty list to store stock data
+stockData <- list()
+
+# Loop through each stock symbol and download the data
+for (stock in stocks) {
+  stockData[[stock]] <- getSymbols(stock, src = "yahoo", 
+                                   from = startDate, 
+                                   to = endDate, 
+                                   auto.assign = FALSE)
+}
+
+stockReturns <- do.call(merge, lapply(stockData@.Data, function(x) Ad(x)))
+
+
+head(stockReturns)
+
+```
+
+Next, we will build the portfolio:
+
+```{r}
+# Load necessary libraries
+library(quantmod)
+library(PerformanceAnalytics)
+
+
+# Extract Adjusted Close prices for each stock
+prices <- do.call(merge, lapply(stockData, Ad))
+
+# Calculate daily returns
+returns <- na.omit(Return.calculate(prices))
+
+# Create an equally weighted portfolio
+numStocks <- length(stockData)
+weights <- rep(1/numStocks, numStocks)
+
+# Portfolio Returns
+portfolioReturns <- Return.portfolio(R = returns, weights = weights)
+
+# Check the first few rows of the portfolio returns
+head(portfolioReturns)
+
+
+```
+
+With this portfolio, we can now start testing our portfolio optimization methods.
+
+The first method is Value-at-Risk and Conditional Value-at-Risk
+
+```{r}
+# Load necessary libraries
+library(PerformanceAnalytics)
+
+# Set confidence level for VaR and CVaR (e.g., 95%)
+confidenceLevel <- 0.95
+
+# Calculate Historical VaR
+VaR_Historical <- VaR(portfolioReturns, p = confidenceLevel, method = "historical")
+
+# Calculate Historical CVaR
+CVaR_Historical <- ES(portfolioReturns, p = confidenceLevel, method = "historical")
+
+# Print the results
+cat("Historical VaR at", confidenceLevel*100, "% confidence level is:", VaR_Historical, "\n")
+cat("Historical CVaR at", confidenceLevel*100, "% confidence level is:", CVaR_Historical, "\n")
+
+```
+
+Next we will run a Monte Carlo simulation:
+
+```{r}
+# Load necessary libraries
+library(quantmod)
+library(PerformanceAnalytics)
+
+# Monte Carlo Simulation Function for Portfolio Optimization
+monteCarloOptimization <- function(returns, numPortfolios = 10000) {
+  numAssets <- ncol(returns)
+  results <- matrix(0, nrow = numPortfolios, ncol = 3 + numAssets)  # Extend matrix to store weights
+  
+  colnames(results) <- c("Return", "Risk", "Sharpe", paste("Weight", 1:numAssets, sep = "_"))
+
+  for (i in 1:numPortfolios) {
+    # Randomly assign weights to the assets
+    weights <- runif(numAssets)
+    weights <- weights / sum(weights)
+    
+    # Calculate portfolio return and risk
+    portfolioReturn <- sum(apply(returns, 1, function(x) sum(x * weights)))
+    portfolioRisk <- sqrt(t(weights) %*% cov(returns) %*% weights)
+    sharpeRatio <- portfolioReturn / portfolioRisk
+    
+    # Store the results, including the weights
+    results[i,] <- c(portfolioReturn, portfolioRisk, sharpeRatio, weights)
+  }
+
+  return(results)
+}
+
+
+
+# Run Monte Carlo Simulation
+mcResults <- monteCarloOptimization(returns)
+
+# Find the portfolio with the highest Sharpe ratio
+optimalPortfolio <- mcResults[which.max(mcResults[, "Sharpe"]),]
+
+# Print the optimal portfolio results
+cat("Optimal Portfolio:\n")
+cat(sprintf("Return: %f\n", optimalPortfolio["Return"]))
+cat(sprintf("Risk: %f\n", optimalPortfolio["Risk"]))
+cat(sprintf("Sharpe Ratio: %f\n", optimalPortfolio["Sharpe"]))
+
+# Print the weights of each stock in the portfolio
+numAssets <- ncol(returns)
+for (j in 1:numAssets) {
+  cat(sprintf("Weight of Asset %d: %f\n", j, optimalPortfolio[paste("Weight", j, sep = "_")]))
+}
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+

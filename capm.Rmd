@@ -1,0 +1,149 @@
+---
+title: "capm"
+author: "Ethan Pinto"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Calculate the stock returns for further analysis:
+```{r}
+# Load the necessary library
+library(quantmod)
+
+# Define the stock symbols
+stocks <- c("AAPL", "TSLA", "GOOG", "MSFT")
+
+# Define the time period for the data
+startDate <- as.Date("2023-01-01")
+endDate <- as.Date("2023-10-31")
+
+# Initialize an empty list to store stock data
+stockData <- list()
+
+# Loop through each stock symbol and download the data
+for (stock in stocks) {
+  stockData[[stock]] <- getSymbols(stock, src = "yahoo", 
+                                   from = startDate, 
+                                   to = endDate, 
+                                   auto.assign = FALSE)
+}
+
+# Initialize an empty list to store stock returns
+stockReturns <- list()
+
+# Loop through each stock symbol and calculate returns
+for (stock in stocks) {
+  tempReturns <- Delt(Ad(stockData[[stock]]))
+  tempReturns[1, ] <- 0  # Set the first day's return to 0
+  stockReturns[[stock]] <- tempReturns
+}
+
+# Merge all return series into a single xts object
+mergedReturns <- do.call(merge, stockReturns)
+
+# Print the first few rows of the merged returns
+head(mergedReturns)
+
+```
+
+
+
+
+Next, we will do CAPM optimization. First we will need to pull in Market return data:
+
+```{r}
+# Load necessary libraries
+library(quantmod)
+library(xts)
+
+# Fetch S&P 500 data directly into a variable
+sp500Data <- getSymbols("^GSPC", src = "yahoo", from = startDate, to = endDate, auto.assign = FALSE)
+
+# Check if the data is correctly formatted
+if (is.null(sp500Data)) {
+  stop("Failed to retrieve S&P 500 data")
+} else {
+  # Convert the data to xts format
+  sp500Close <- Ad(sp500Data)  # Using Ad() to extract adjusted closing prices
+
+  # Calculate the market return
+  marketReturn <- Return.calculate(sp500Close)
+
+  # Handling the first row: replacing NA with 0
+  marketReturn[1,] <- 0
+
+  # Print the first few rows to verify
+  head(marketReturn)
+}
+
+```
+
+
+
+```{r}
+# Load necessary libraries
+# Load necessary libraries
+library(quantmod)
+library(PerformanceAnalytics)
+library(tseries)
+
+# Function to calculate Beta for each stock
+calculateBeta <- function(mergedReturns, marketReturn) {
+  
+  # Bind columns
+  combinedData <- cbind(coredata(mergedReturns), coredata(marketReturn))
+  
+  # Calculate covariance matrix
+  covMat <- cov(combinedData)
+
+  # Calculate beta
+  beta <- covMat[1, 2] / var(coredata(marketReturn))
+  return(beta)
+}
+
+
+
+# Function for CAPM-based Portfolio Optimization
+capmOptimization <- function(mergedReturns, marketReturn, riskFreeRate) {
+  numAssets <- ncol(mergedReturns)
+  betas <- numeric(numAssets)
+  
+ # Calculate Beta for each stock
+  for (i in 1:numAssets) {
+    betas[i] <- calculateBeta(mergedReturns[, i], marketReturn)
+  }
+
+  # Calculate Expected Return for each stock using CAPM
+  expectedReturns <- riskFreeRate + betas * (mean(marketReturn, na.rm = TRUE) - riskFreeRate)
+
+  # Covariance matrix of returns
+  covReturns <- cov(mergedReturns, use = "pairwise.complete.obs")
+
+  # Define Dmat, dvec, Amat, bvec for quadratic programming
+  Dmat <- 2 * covReturns
+  dvec <- rep(0, numAssets)
+  Amat <- rbind(1, diag(numAssets))
+  bvec <- c(1, rep(0, numAssets))
+
+  # Solve quadratic programming problem
+  portfolioOptim <- solve.QP(Dmat, dvec, t(Amat), bvec, meq = 1)
+
+  # Extract optimized weights
+  portfolioWeights <- portfolioOptim$solution
+
+  return(list(betas = betas, expectedReturns = expectedReturns, weights = portfolioWeights))
+}
+
+# Set a risk-free rate
+riskFreeRate <- 0.015
+
+capmResults <- capmOptimization(mergedReturns, marketReturn, riskFreeRate)
+
+print(capmResults)
+
+```
