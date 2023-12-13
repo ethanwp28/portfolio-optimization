@@ -11,6 +11,7 @@ Portfolio setup:
 -	Consumer: Amazon, Tesla
 -	Industrials: Lockheed Martin, General Electric
 -	Financials: Wells Fargo, BlackRock
+
 As far as the thought process that went into creating the portfolio, I mostly stuck with established companies and companies that I am personally invested in; however, a few of them (Novo Nordisk, Pfizer, BlackRock) I chose due to the world events over the last 5 years. I wanted to see how they performed over this period.
 Next I needed to define each of the optimization methods that I wanted to pass my portfolio through. For the purpose of this project, I chose the following five methods for optimization:
 -	Monte Carlo simulation
